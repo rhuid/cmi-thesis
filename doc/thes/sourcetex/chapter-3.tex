@@ -1,1 +1,174 @@
-Haha
+\chapter{A foundational multi-modal verifier}
+
+\section{Framework}
+
+Loom is a foundational verifier in that all its semantics and proofs are
+expressed in a theorem prover and proof assistant (Lean). Therefore, in this
+sense, final guarantees rely only on the Lean kernel. This shifts the burden of
+trust from an external software or language like Dafny to a theorem prover,
+thereby avoiding trusting large external verification pipelines.
+
+To be precise, Loom is actually a framework for building multi-modal verifiers.
+That is to say, it is not a single verifier but rather a meta-framework for
+constructing many. But by abuse of language (and for convenience), we shall
+simply refer to Loom as a verifier to mean one such verifier built upon Loom.
+Later, we shall see Velvet which is an actual verifier built on top of Loom.
+
+Loom provides some mathematical constructions and proofs of these constructions
+expressed in Lean. Programs in Loom are modeled using monads. Monads are a way
+to structure computations as a sequence of steps, where each step can also be
+seen as a computation that potentially gives a value while also producing
+potentially a side effect such as IO operation, failure, file reading or
+writing. Monads give a compositional semantics. Programs become mathematical
+objects inside Lean.
+
+Loom uses an algebraic structure called monad transformer. Complex program
+behaviors can be built using monad transformers. A monad transformer is like a
+type constructor except it receives a monad and give back another monad. In our
+case, we think of each monad transformer encoding some effect such as failure or
+nondeterminism. By stacking monad transformers, one can then build programs with
+multiple side effects. Verifiers can be constructed by stacking transformers.
+
+\section{Shallow Embedding}
+
+Lean is a very malleable language. Indeed, it is quite feasible to extend Lean
+or build a DSL inside Lean. Generally speaking, there are two approaches to
+building a language on the top of Lean. They are deep and shallow embedding.
+
+In deep embedding, we use data structures (or inductive types in our case) to
+build abstract syntax tree (AST) and write interpreters to interpret them. If we
+go along this route to build our verifier language, we also have to verify the
+correctness of the semantics of our interpreter.
+
+Loom instead uses shallow embedding. Here programs are written directly in
+Lean's language. No separate syntax or external language is needed. Benefits are
+that it reuses Lean's type system and it now has direct access to proofs and
+tactics. Programs are just Lean terms and this allows smooth integration with
+theorem proving.
+
+
+\section{Hybrid Workflow}
+
+Another strong usage of Loom would be its hybrid workflow. It aims to seamlessly
+blend automation via SMT solving with interactive theorem proving via Lean's
+by-tactic blocks. This points to a unified framework for program execution,
+verification and proof development in the same environment.
+
+\section{Velvet}
+
+We have mentioned before that Loom is not a single verifier but rather a
+framework for building verifiers. We have been loosely referring to Loom as if
+it were an actual verifier language but now we meet Velvet, an actual DSL and
+verifier built on top of Lean.
+
+The syntax of Velvet is inspired by Dafny. As with other verification languages,
+Velvet is used to write programs with specifications. Programs are written in
+imperative style (Velvet gives this imperative syntax). Velvet is also the name
+of the monad in which all programs are written. Indeed, Velvet is an
+abbreviation defined by
+
+\begin{leanblock}
+  abbrev VelvetM α := NonDetT DivM α
+\end{leanblock}
+
+That is, \lean{VelvetM} is a monad built from the divergence monad \lean{DivM}
+(this encodes programs which can terminate or diverge, that is, to not
+terminate) and the non-determinism monad transformer \lean{NonDetT} (this
+encodes programs which can have non-deterministic behavior).
+
+Indeed, all programs in Velvet DSL have the type \lean{VelvetM}.
+
+Velvet combines automation (via \lean{loom_solve} which is an automation tactic
+provided by Loom) and interactive proofs (which are just Lean tactics). More
+automation is possible through backends SMT solvers such as Z3 or CVC5. This
+gives a hybrid workflow in which verification usually proceeds by attacking with
+automation and followed by, if needed, more interactive theorem proving
+(tactics).
+
+\section{Imperative Programming Syntax}
+
+A majority of programmers are used to imperative-style programming like C or C++
+or Java, and a lot of programming in current industry is mostly imperative.
+Velvet gives an imperative-style syntax built on top of the functional language
+Lean, made possible by leveraging the metaprogramming and elaboration techniques
+of the language.
+
+The following is a typical program written in Velvet.
+
+\begin{leanblock}
+method DoubleAll (mut arr: Array Int) return (u: Unit)
+    ensures arr.size = arrOld.size
+    ensures ∀ i, 0 ≤ i ∧ i < arr.size → arr[i]! = 2 * arrOld[i]!
+    do
+    let mut i := 0
+    while i < arr.size
+        invariant arr.size = arrOld.size
+        invariant 0 ≤ i ∧ i ≤ arr.size
+        invariant ∀ k, 0 ≤ k ∧ k < i → arr[k]! = 2 * arrOld[k]!
+        invariant ∀ k, i ≤ k ∧ k < arr.size → arr[k]! = arrOld[k]!
+        done_with i = arr.size
+    do
+        arr := arr.set! i (2 * arr[i]!)
+        i := i + 1
+    return
+\end{leanblock}
+
+The function starts with the keyword \lean{method}. The preconditions and
+postconditions are provided using \lean{require} and \lean{ensures} clauses.
+Multiple specifications are provided with multiple \lean{require} and
+\lean{ensures} clauses. The \lean{while} loop requires invariants which are
+provided using \lean{invariant} clause.
+
+All functions written this way (using \lean{method}) are elaborated to standard
+Lean programs or terms in the monad \lean{VelvetM}. Indeed, if we type
+\lean{#print DoubleAll}, we see the output:
+
+\begin{leanblock}
+def DoubleAll : Array ℤ → VelvetM (Unit × Array ℤ)
+\end{leanblock}
+
+The above type can look a bit confusing (the extra \lean{Array ℤ} in the return)
+but this is due to how mutable parameters are handled in Velvet which we will
+see later.
+
+\section{Multi-modal Verification}
+
+To execute or run the function, we simply evaluate:
+
+\begin{leanblock}
+#eval (DoubleAll #[1, 2, 3]).run
+\end{leanblock}
+
+One can also perform property-based testing (PBT). This allows us to test
+methods with random inputs before actual verification.
+
+To prove the functional correctness and that the specifications hold for all
+inputs, we do
+
+\begin{leanblock}
+prove_correct DoubleAll
+  by loom_solve
+\end{leanblock}
+
+As mentioned above, \lean{loom_solve} is an automation tactic and usually forms
+the first line of attack. For most simple proof obligations, Velvet claims, this
+tactic is enough to finish the proof by itself. In the cases it does not, one
+can try more tactics to finish the remaining goals.
+
+By multi-modal, it refers to the fact that Velvet can handle program execution,
+testing and deductive reasoning (formal verification) all in one environment.
+
+\section{More on Loom and Velvet}
+
+Velvet can do a lot more than what we have described in the above. For instance,
+it allows programmers to change the semantics (that is from ``partial'' to
+``total'' correctness for termination, or from ``demonic'' to ``angelic'' for
+non-deterministic programs). These options are set in the beginning of the
+program file. Usually, the options are set to ``partial correctness'' and
+``demonic'' choice.
+
+Switching from ``partial'' to ``total'' correctness restricts programmers to
+write only terminating programs in the sense that when they write loops, for
+instance, they also have to provide termination measures.
+
+For more details, one can refer to this excellent documentation. [HERE]

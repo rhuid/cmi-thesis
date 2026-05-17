@@ -9,7 +9,13 @@
 \maketitle
 
 \begin{abstract}
-We design an imperative language and a mechanized Hoare-logic-based verifier for the same. The design is implemented and proved sound in Lean theorem prover. Then we present some verified case studies.
+  Velvet is a Dafny-style verifier for imperative programs in Lean, built on
+Loom. This thesis extends Velvet with cost-aware verification, enabling
+programmers to specify and verify resource bounds alongside functional
+correctness. The extension is implemented via syntax-directed instrumentation
+using Lean’s elaboration mechanism, allowing cost reasoning to reuse the
+existing verification infrastructure. We demonstrate the approach on some
+examples.
 \end{abstract}
 
 \vfill
